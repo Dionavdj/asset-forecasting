@@ -2,83 +2,101 @@
 Data loading helpers for fetching stock data.
 """
 import os
+import time
+import random
+import logging
 import pandas as pd
 import yfinance as yf
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
+
+# Suppress yfinance warnings
+logging.getLogger('yfinance').setLevel(logging.CRITICAL)
+
+# Date range: 14.12.2020 to 12.12.2025 (inclusive)
+START_DATE = datetime(2020, 12, 14)
+END_DATE = datetime(2025, 12, 12)
+MAX_DATE = END_DATE
 
 
-# Maximum date for data cutoff
-MAX_DATE = datetime(2025, 12, 12)
-
-
-def _get_cache_filename(ticker: str) -> str:
-    """Generate a cache filename based on ticker."""
-    return f"yfinance_cache_{ticker}.csv"
-
-
-def _filter_to_max_date(data: pd.DataFrame) -> pd.DataFrame:
-    """Filter data to include only rows up to MAX_DATE (inclusive)."""
+def _normalize_index(data: pd.DataFrame) -> pd.DataFrame:
+    """Convert index to timezone-naive datetime if needed."""
     if data.empty:
         return data
-    
-    # Ensure index is datetime
     if not isinstance(data.index, pd.DatetimeIndex):
         data.index = pd.to_datetime(data.index)
-    
-    # Filter to max date (inclusive)
-    filtered = data[data.index <= MAX_DATE]
-    return filtered
+    if hasattr(data.index, 'tz') and data.index.tz is not None:
+        data.index = data.index.tz_localize(None)
+    return data
+
+
+def _filter_to_date_range(data: pd.DataFrame) -> pd.DataFrame:
+    """Filter data to START_DATE to END_DATE (inclusive)."""
+    if data.empty:
+        return data
+    data = _normalize_index(data)
+    mask = (data.index >= START_DATE) & (data.index <= END_DATE)
+    return data[mask]
+
+
+def _get_cache_path(ticker: str) -> str:
+    """Get cache file path."""
+    cache_dir = os.path.join(os.getcwd(), "data", "raw")
+    os.makedirs(cache_dir, exist_ok=True)
+    return os.path.join(cache_dir, f"yfinance_cache_{ticker}.csv")
 
 
 def _load_from_cache(ticker: str) -> Optional[pd.DataFrame]:
     """Load data from cache if it exists."""
-    cache_dir = os.path.join(os.getcwd(), "data", "raw")
-    cache_file = os.path.join(cache_dir, _get_cache_filename(ticker))
+    cache_file = _get_cache_path(ticker)
+    if not os.path.exists(cache_file):
+        return None
     
-    if os.path.exists(cache_file):
-        try:
-            data = pd.read_csv(cache_file, index_col=0, parse_dates=True)
-            # Convert index to datetime if it's not already
-            if not isinstance(data.index, pd.DatetimeIndex):
-                data.index = pd.to_datetime(data.index)
-            # Convert to timezone-naive if needed
-            if hasattr(data.index, 'tz') and data.index.tz is not None:
-                data.index = data.index.tz_localize(None)
-            
-            # Filter to max date
-            data = _filter_to_max_date(data)
-            
-            print(f"[Cache] Loaded {ticker} data from cache ({len(data)} rows, filtered to <= {MAX_DATE.date()})")
-            return data
-        except Exception as e:
-            print(f"[Cache] Error loading cache: {e}")
-            return None
-    return None
+    try:
+        data = pd.read_csv(cache_file, index_col=0, parse_dates=True)
+        data = _normalize_index(data)
+        data = _filter_to_date_range(data)
+        print(f"[Cache] Loaded {ticker} data from cache ({len(data)} rows)")
+        return data
+    except Exception as e:
+        print(f"[Cache] Error loading cache: {e}")
+        return None
 
 
 def _save_to_cache(ticker: str, data: pd.DataFrame):
     """Save downloaded data to cache."""
     if data.empty:
         return
-    
-    # Filter to max date before saving
-    data = _filter_to_max_date(data)
-    
-    cache_dir = os.path.join(os.getcwd(), "data", "raw")
-    os.makedirs(cache_dir, exist_ok=True)
-    cache_file = os.path.join(cache_dir, _get_cache_filename(ticker))
-    
     try:
-        # Make a copy to avoid modifying original
-        data_to_save = data.copy()
-        # Convert timezone-aware index to naive for CSV storage
-        if data_to_save.index.tz is not None:
-            data_to_save.index = data_to_save.index.tz_localize(None)
-        data_to_save.to_csv(cache_file)
-        print(f"[Cache] Saved {ticker} data to cache ({len(data)} rows, filtered to <= {MAX_DATE.date()})")
+        data_to_save = _filter_to_date_range(data.copy())
+        data_to_save = _normalize_index(data_to_save)
+        data_to_save.to_csv(_get_cache_path(ticker))
+        print(f"[Cache] Saved {ticker} data to cache ({len(data_to_save)} rows)")
     except Exception as e:
         print(f"[Cache] Error saving cache: {e}")
+
+
+def _fetch_data(ticker: str, interval: str) -> pd.DataFrame:
+    """Fetch data from Yahoo Finance using the most reliable method."""
+    request_start = (START_DATE - timedelta(days=7)).strftime("%Y-%m-%d")
+    request_end = (END_DATE + timedelta(days=1)).strftime("%Y-%m-%d")  # yfinance end is exclusive
+    
+    try:
+        ticker_obj = yf.Ticker(ticker)
+        data = ticker_obj.history(start=request_start, end=request_end, interval=interval)
+        if not data.empty:
+            data = _filter_to_date_range(data)
+        return data
+    except Exception:
+        # Fallback: use period parameter
+        try:
+            ticker_obj = yf.Ticker(ticker)
+            data = ticker_obj.history(period="5y", interval=interval)
+            if not data.empty:
+                data = _filter_to_date_range(data)
+            return data
+        except Exception:
+            return pd.DataFrame()
 
 
 def fetch_yfinance(
@@ -87,57 +105,69 @@ def fetch_yfinance(
     interval: str = "1d",
     use_cache: bool = True,
     cache_only: bool = False,
+    max_retries: int = 3,
 ) -> pd.DataFrame:
     """
     Fetch stock data using yfinance library with caching support.
-    Data is automatically filtered to stop at 2025-12-12 (inclusive).
+    Data is automatically filtered to 2020-12-14 to 2025-12-12 (inclusive).
     
     Args:
         ticker: Stock ticker symbol (e.g., 'TSLA')
-        period: Download period (e.g., '1y', '2y', '3y')
+        period: Not used, kept for compatibility
         interval: Data interval (e.g., '1d', '1wk', '1mo')
         use_cache: If True, use cached data if available, and cache new downloads
-        cache_only: If True, never download; return cached data or empty DataFrame.
+        cache_only: If True, never download; return cached data or empty DataFrame
+        max_retries: Maximum number of retry attempts
         
     Returns:
-        DataFrame with stock data (columns: Open, High, Low, Close, Volume, etc.)
-        Filtered to dates <= 2025-12-12
+        DataFrame with stock data filtered to START_DATE to END_DATE
     """
-    # Try to load from cache first
+    # Try cache first
     if use_cache or cache_only:
         cached_data = _load_from_cache(ticker)
         if cached_data is not None:
             return cached_data
     
-    # In cache-only mode, never attempt a download
     if cache_only:
         print(f"[Cache] Cache-only mode enabled but no cache found for {ticker}.")
         return pd.DataFrame()
     
-    # Download from Yahoo Finance
-    try:
-        print(f"[Download] Fetching {ticker} data from Yahoo Finance (period={period}, interval={interval})...")
-        ticker_obj = yf.Ticker(ticker)
-        data = ticker_obj.history(period=period, interval=interval)
-        
-        if data.empty:
-            print(f"[Download] No data returned for {ticker}")
+    # Add initial delay to avoid rate limiting
+    time.sleep(1 + random.uniform(0, 1))
+    
+    # Retry logic
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                wait_time = (5 * (2 ** attempt)) + random.uniform(0, 2)
+                print(f"[Download] Retry attempt {attempt + 1}/{max_retries} after {wait_time:.1f}s...")
+                time.sleep(wait_time)
+            
+            print(f"[Download] Fetching {ticker} data from Yahoo Finance...")
+            data = _fetch_data(ticker, interval)
+            
+            if data.empty:
+                print(f"[Download] No data returned for {ticker}")
+                if attempt < max_retries - 1:
+                    continue
+                print(f"[Download] Failed to fetch {ticker} after {max_retries} attempts")
+                return pd.DataFrame()
+            
+            # Ensure Adj Close column exists
+            if "Adj Close" not in data.columns and "Close" in data.columns:
+                data["Adj Close"] = data["Close"]
+            
+            # Save to cache
+            if use_cache:
+                _save_to_cache(ticker, data)
+            
+            print(f"[Download] Successfully downloaded {len(data)} rows for {ticker}")
+            return data
+            
+        except Exception as e:
+            print(f"[Download] Error (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                continue
             return pd.DataFrame()
-        
-        # Ensure Adj Close column exists
-        if "Adj Close" not in data.columns and "Close" in data.columns:
-            data["Adj Close"] = data["Close"]
-        
-        # Filter to max date
-        data = _filter_to_max_date(data)
-        
-        # Save to cache
-        if use_cache:
-            _save_to_cache(ticker, data)
-        
-        print(f"[Download] Successfully downloaded {len(data)} rows for {ticker} (filtered to <= {MAX_DATE.date()})")
-        return data
-        
-    except Exception as e:
-        print(f"[Download] Error fetching {ticker} data: {e}")
-        return pd.DataFrame()
+    
+    return pd.DataFrame()

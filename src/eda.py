@@ -1,9 +1,11 @@
 """
 Basic exploratory data analysis for stock data.
 """
+import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from typing import Optional
 from src.data_loader import fetch_yfinance
 
 
@@ -21,6 +23,10 @@ def plot_price(data: pd.DataFrame, ticker: str, save_path: Optional[str] = None)
         print("No data to plot")
         return
     
+    # Use non-interactive backend to avoid GUI issues
+    import matplotlib
+    matplotlib.use('Agg')  # Use non-interactive backend
+    
     plt.figure(figsize=(10, 6))
     plt.plot(data.index, data['Close'], label='Close Price', linewidth=1.5)
     plt.title(f'{ticker} Stock Price Over Time')
@@ -30,9 +36,12 @@ def plot_price(data: pd.DataFrame, ticker: str, save_path: Optional[str] = None)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     
-    if save_path:
-        plt.savefig(save_path)
-        print(f"Saved plot to {save_path}")
-    else:
-        plt.show()
+    # Always save the plot (non-blocking)
+    if save_path is None:
+        # Default save path if not provided
+        os.makedirs('results', exist_ok=True)
+        save_path = f'results/{ticker}_price.png'
+    
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    print(f"Saved plot to {save_path}")
     plt.close()
