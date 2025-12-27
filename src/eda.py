@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Optional, Dict
+from scipy import stats
 from src.data_loader import fetch_yfinance
 
 
@@ -37,7 +38,6 @@ def plot_price(data: pd.DataFrame, ticker: str, save_path: Optional[str] = None)
         print("No data to plot")
         return
     
-    # Use non-interactive backend to avoid GUI issues
     import matplotlib
     matplotlib.use('Agg')
     
@@ -53,6 +53,46 @@ def plot_price(data: pd.DataFrame, ticker: str, save_path: Optional[str] = None)
     if save_path is None:
         os.makedirs('results', exist_ok=True)
         save_path = f'results/{ticker}_price.png'
+    
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    print(f"Saved plot to {save_path}")
+    plt.close()
+
+
+def plot_returns_distribution(
+    returns: pd.Series, 
+    ticker: str, 
+    save_path: Optional[str] = None
+):
+    """Plot returns distribution with histogram and Q-Q plot."""
+    if returns.empty or returns.isna().all():
+        print("No returns data to plot")
+        return
+    
+    clean_returns = returns.dropna()
+    
+    import matplotlib
+    matplotlib.use('Agg')
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    
+    # Histogram
+    ax1.hist(clean_returns, bins=50, density=True, alpha=0.7, edgecolor='black')
+    ax1.set_title(f'{ticker} Returns Distribution')
+    ax1.set_xlabel('Returns')
+    ax1.set_ylabel('Density')
+    ax1.grid(True, alpha=0.3)
+    
+    # Q-Q plot
+    stats.probplot(clean_returns, dist="norm", plot=ax2)
+    ax2.set_title(f'{ticker} Q-Q Plot (Normal)')
+    ax2.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    if save_path is None:
+        os.makedirs('results', exist_ok=True)
+        save_path = f'results/{ticker}_returns_dist.png'
     
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     print(f"Saved plot to {save_path}")
