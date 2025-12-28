@@ -97,3 +97,53 @@ def plot_returns_distribution(
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     print(f"Saved plot to {save_path}")
     plt.close()
+
+
+def plot_volatility(
+    prices: pd.Series,
+    returns: pd.Series,
+    ticker: str,
+    save_path: Optional[str] = None
+):
+    """Plot rolling volatility over time."""
+    if returns.empty:
+        print("No returns data to plot")
+        return
+    
+    vol_21d = calculate_volatility(returns, window=21)
+    vol_252d = calculate_volatility(returns, window=252)
+    
+    import matplotlib
+    matplotlib.use('Agg')
+    
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+    
+    # Price and volatility
+    ax1_twin = ax1.twinx()
+    ax1.plot(prices.index, prices.values, label='Price', color='blue', linewidth=1)
+    ax1_twin.plot(vol_21d.index, vol_21d.values, label='21-day Volatility', color='red', alpha=0.7)
+    ax1.set_ylabel('Price ($)', color='blue')
+    ax1_twin.set_ylabel('Volatility (%)', color='red')
+    ax1.set_title(f'{ticker} Price and Volatility')
+    ax1.legend(loc='upper left')
+    ax1_twin.legend(loc='upper right')
+    ax1.grid(True, alpha=0.3)
+    
+    # Rolling volatility comparison
+    ax2.plot(vol_21d.index, vol_21d.values, label='21-day', alpha=0.7)
+    ax2.plot(vol_252d.index, vol_252d.values, label='252-day', alpha=0.7)
+    ax2.set_xlabel('Date')
+    ax2.set_ylabel('Volatility (%)')
+    ax2.set_title(f'{ticker} Rolling Volatility')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    if save_path is None:
+        os.makedirs('results', exist_ok=True)
+        save_path = f'results/{ticker}_volatility.png'
+    
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    print(f"Saved plot to {save_path}")
+    plt.close()
