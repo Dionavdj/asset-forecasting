@@ -6,6 +6,21 @@ import pandas as pd
 from statsmodels.tsa.ar_model import AutoReg
 
 
+def random_walk_baseline(returns: pd.Series, n_periods: int) -> np.ndarray:
+    """Random walk with drift - simple baseline model."""
+    clean_returns = returns.dropna()
+    
+    if len(clean_returns) == 0:
+        return np.zeros(n_periods)
+    
+    # Mean return (drift)
+    mean_return = clean_returns.mean()
+    
+    # Forecast: just use mean return for all periods
+    forecast = np.full(n_periods, mean_return)
+    return forecast
+
+
 def train_ar1(returns: pd.Series):
     """Train AR(1) model on returns."""
     # Remove NaN values
