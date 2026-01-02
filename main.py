@@ -9,7 +9,11 @@ from src.eda import (
     plot_returns_distribution,
     plot_volatility
 )
-from src.models import train_ar1, forecast_ar1, random_walk_baseline
+from src.models import (
+    train_ar1, forecast_ar1,
+    train_arima, forecast_arima,
+    random_walk_baseline
+)
 from src.evaluation import calculate_rmse, calculate_mae
 
 TICKER = os.getenv("TICKER", "TSLA")
@@ -55,6 +59,15 @@ def main():
         rmse = calculate_rmse(actual, forecast)
         mae = calculate_mae(actual, forecast)
         print(f"AR(1) - RMSE: {rmse:.6f}, MAE: {mae:.6f}")
+    
+    # Test ARIMA
+    print("\nTraining ARIMA model...")
+    arima_model = train_arima(train_returns)
+    if arima_model is not None:
+        forecast = forecast_arima(arima_model, n_forecast)
+        rmse = calculate_rmse(actual, forecast)
+        mae = calculate_mae(actual, forecast)
+        print(f"ARIMA - RMSE: {rmse:.6f}, MAE: {mae:.6f}")
     
     # Test baseline
     print("\nTesting baseline...")
