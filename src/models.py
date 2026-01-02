@@ -4,6 +4,7 @@ Forecasting models for stock returns.
 import numpy as np
 import pandas as pd
 from statsmodels.tsa.ar_model import AutoReg
+from statsmodels.tsa.arima.model import ARIMA
 
 
 def random_walk_baseline(returns: pd.Series, n_periods: int) -> np.ndarray:
@@ -48,4 +49,34 @@ def forecast_ar1(model, n_periods: int) -> np.ndarray:
         return forecast
     except Exception as e:
         print(f"Error forecasting with AR(1): {e}")
+        return np.array([])
+
+
+def train_arima(returns: pd.Series):
+    """Train ARIMA model - TODO: auto-select order"""
+    clean_returns = returns.dropna()
+    
+    if len(clean_returns) < 20:
+        return None
+    
+    try:
+        # For now, just use ARIMA(1,0,1) - will improve later
+        model = ARIMA(clean_returns, order=(1, 0, 1))
+        fitted = model.fit()
+        return fitted
+    except Exception as e:
+        print(f"Error training ARIMA: {e}")
+        return None
+
+
+def forecast_arima(model, n_periods: int) -> np.ndarray:
+    """Forecast using ARIMA model."""
+    if model is None:
+        return np.array([])
+    
+    try:
+        forecast = model.forecast(steps=n_periods)
+        return forecast
+    except Exception as e:
+        print(f"Error forecasting with ARIMA: {e}")
         return np.array([])
