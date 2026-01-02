@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from statsmodels.tsa.ar_model import AutoReg
 from statsmodels.tsa.arima.model import ARIMA
+from pmdarima import auto_arima
 
 
 def random_walk_baseline(returns: pd.Series, n_periods: int) -> np.ndarray:
@@ -53,20 +54,40 @@ def forecast_ar1(model, n_periods: int) -> np.ndarray:
 
 
 def train_arima(returns: pd.Series):
-    """Train ARIMA model - TODO: auto-select order"""
+    """Train ARIMA model with auto-selected order."""
     clean_returns = returns.dropna()
     
     if len(clean_returns) < 20:
         return None
     
     try:
-        # For now, just use ARIMA(1,0,1) - will improve later
-        model = ARIMA(clean_returns, order=(1, 0, 1))
+        # Use auto_arima to find best order
+        auto_model = auto_arima(
+            clean_returns,
+            start_p=0, start_q=0,
+            max_p=3, max_q=3,
+            seasonal=False,
+            stepwise=True,
+            suppress_warnings=True,
+            error_action='ignore',
+            random_state=42,
+            n_jobs=1
+        )
+        
+        # Get the order and fit with statsmodels for consistency
+        order = auto_model.order
+        model = ARIMA(clean_returns, order=order)
         fitted = model.fit()
         return fitted
     except Exception as e:
         print(f"Error training ARIMA: {e}")
-        return None
+        # Fallback to simple AR(1)
+        try:
+            model = ARIMA(clean_returns, order=(1, 0, 0))
+            fitted = model.fit()
+            return fitted
+        except:
+            return None
 
 
 def forecast_arima(model, n_periods: int) -> np.ndarray:
