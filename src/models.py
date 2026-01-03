@@ -6,6 +6,8 @@ import pandas as pd
 from statsmodels.tsa.ar_model import AutoReg
 from statsmodels.tsa.arima.model import ARIMA
 from pmdarima import auto_arima
+from sklearn.linear_model import Ridge
+from sklearn.preprocessing import StandardScaler
 
 
 def random_walk_baseline(returns: pd.Series, n_periods: int) -> np.ndarray:
@@ -100,4 +102,69 @@ def forecast_arima(model, n_periods: int) -> np.ndarray:
         return forecast
     except Exception as e:
         print(f"Error forecasting with ARIMA: {e}")
+        return np.array([])
+        
+
+def train_ridge(returns: pd.Series, lags: int = 5, alpha: float = 1.0):
+    """Train Ridge regression model with lag features."""
+    clean_returns = returns.dropna()
+    
+    if len(clean_returns) < lags + 10:
+        return None, None
+    
+    # Create lag features
+    X = []
+    y = []
+    
+    for i in range(lags, len(clean_returns)):
+        features = [clean_returns.iloc[i - j] for j in range(1, lags + 1)]
+        X.append(features)
+        y.append(clean_returns.iloc[i])
+    
+    X = np.array(X)
+    y = np.array(y)
+    
+    # Scale features
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    try:
+        model = Ridge(alpha=alpha, random_state=42)
+        model.fit(X_scaled, y)
+        return model, scaler
+    except Exception as e:
+        print(f"Error training Ridge: {e}")
+        return None, None
+
+
+def forecast_ridge(model, scaler, returns: pd.Series, n_periods: int, lags: int = 5) -> np.ndarray:
+    """Forecast using Ridge model."""
+    if model is None or scaler is None:
+        return np.array([])
+    
+    clean_returns = returns.dropna()
+    
+    if len(clean_returns) < lags:
+        return np.array([])
+    
+    forecast = []
+    current_series = clean_returns.copy()
+    
+    try:
+        for _ in range(n_periods):
+            # Get last lags values
+            features = [current_series.iloc[-j] for j in range(1, lags + 1)]
+            features = np.array(features).reshape(1, -1)
+            features_scaled = scaler.transform(features)
+            
+            # Predict next value
+            pred = model.predict(features_scaled)[0]
+            forecast.append(pred)
+            
+            # Add to series for next prediction
+            current_series = pd.concat([current_series, pd.Series([pred])])
+        
+        return np.array(forecast)
+    except Exception as e:
+        print(f"Error forecasting with Ridge: {e}")
         return np.array([])
