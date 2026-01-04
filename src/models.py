@@ -6,7 +6,7 @@ import pandas as pd
 from statsmodels.tsa.ar_model import AutoReg
 from statsmodels.tsa.arima.model import ARIMA
 from pmdarima import auto_arima
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import Ridge, Lasso, ElasticNet
 from sklearn.preprocessing import StandardScaler
 
 
@@ -103,7 +103,20 @@ def forecast_arima(model, n_periods: int) -> np.ndarray:
     except Exception as e:
         print(f"Error forecasting with ARIMA: {e}")
         return np.array([])
-        
+
+
+def _create_lag_features(returns: pd.Series, lags: int):
+    """Helper function to create lag features."""
+    X = []
+    y = []
+    
+    for i in range(lags, len(returns)):
+        features = [returns.iloc[i - j] for j in range(1, lags + 1)]
+        X.append(features)
+        y.append(returns.iloc[i])
+    
+    return np.array(X), np.array(y)
+
 
 def train_ridge(returns: pd.Series, lags: int = 5, alpha: float = 1.0):
     """Train Ridge regression model with lag features."""
@@ -112,17 +125,7 @@ def train_ridge(returns: pd.Series, lags: int = 5, alpha: float = 1.0):
     if len(clean_returns) < lags + 10:
         return None, None
     
-    # Create lag features
-    X = []
-    y = []
-    
-    for i in range(lags, len(clean_returns)):
-        features = [clean_returns.iloc[i - j] for j in range(1, lags + 1)]
-        X.append(features)
-        y.append(clean_returns.iloc[i])
-    
-    X = np.array(X)
-    y = np.array(y)
+    X, y = _create_lag_features(clean_returns, lags)
     
     # Scale features
     scaler = StandardScaler()
@@ -137,8 +140,52 @@ def train_ridge(returns: pd.Series, lags: int = 5, alpha: float = 1.0):
         return None, None
 
 
-def forecast_ridge(model, scaler, returns: pd.Series, n_periods: int, lags: int = 5) -> np.ndarray:
-    """Forecast using Ridge model."""
+def train_lasso(returns: pd.Series, lags: int = 5, alpha: float = 0.1):
+    """Train Lasso regression model with lag features."""
+    clean_returns = returns.dropna()
+    
+    if len(clean_returns) < lags + 10:
+        return None, None
+    
+    X, y = _create_lag_features(clean_returns, lags)
+    
+    # Scale features
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    try:
+        model = Lasso(alpha=alpha, random_state=42, max_iter=1000)
+        model.fit(X_scaled, y)
+        return model, scaler
+    except Exception as e:
+        print(f"Error training Lasso: {e}")
+        return None, None
+
+
+def train_elasticnet(returns: pd.Series, lags: int = 5, alpha: float = 0.1, l1_ratio: float = 0.5):
+    """Train ElasticNet regression model with lag features."""
+    clean_returns = returns.dropna()
+    
+    if len(clean_returns) < lags + 10:
+        return None, None
+    
+    X, y = _create_lag_features(clean_returns, lags)
+    
+    # Scale features
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    try:
+        model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio, random_state=42, max_iter=1000)
+        model.fit(X_scaled, y)
+        return model, scaler
+    except Exception as e:
+        print(f"Error training ElasticNet: {e}")
+        return None, None
+
+
+def forecast_linear(model, scaler, returns: pd.Series, n_periods: int, lags: int = 5) -> np.ndarray:
+    """Forecast using linear model (Ridge/Lasso/ElasticNet)."""
     if model is None or scaler is None:
         return np.array([])
     
@@ -166,5 +213,5 @@ def forecast_ridge(model, scaler, returns: pd.Series, n_periods: int, lags: int 
         
         return np.array(forecast)
     except Exception as e:
-        print(f"Error forecasting with Ridge: {e}")
+        print(f"Error forecasting with linear model: {e}")
         return np.array([])
