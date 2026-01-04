@@ -8,6 +8,7 @@ from statsmodels.tsa.arima.model import ARIMA
 from pmdarima import auto_arima
 from sklearn.linear_model import Ridge, Lasso, ElasticNet
 from sklearn.preprocessing import StandardScaler
+from xgboost import XGBRegressor
 
 
 def random_walk_baseline(returns: pd.Series, n_periods: int) -> np.ndarray:
@@ -214,4 +215,54 @@ def forecast_linear(model, scaler, returns: pd.Series, n_periods: int, lags: int
         return np.array(forecast)
     except Exception as e:
         print(f"Error forecasting with linear model: {e}")
+        return np.array([])
+
+
+def train_xgb(returns: pd.Series, lags: int = 5):
+    """Train XGBoost model on returns with lag features."""
+    clean_returns = returns.dropna()
+    
+    if len(clean_returns) < lags + 10:
+        return None
+    
+    X, y = _create_lag_features(clean_returns, lags)
+    
+    try:
+        model = XGBRegressor(n_estimators=100, max_depth=3, random_state=42)
+        model.fit(X, y)
+        return model
+    except Exception as e:
+        print(f"Error training XGBoost: {e}")
+        return None
+
+
+def forecast_xgb(model, returns: pd.Series, n_periods: int, lags: int = 5) -> np.ndarray:
+    """Forecast using XGBoost model."""
+    if model is None:
+        return np.array([])
+    
+    clean_returns = returns.dropna()
+    
+    if len(clean_returns) < lags:
+        return np.array([])
+    
+    forecast = []
+    current_series = clean_returns.copy()
+    
+    try:
+        for _ in range(n_periods):
+            # Get last lags values
+            features = [current_series.iloc[-j] for j in range(1, lags + 1)]
+            features = np.array(features).reshape(1, -1)
+            
+            # Predict next value
+            pred = model.predict(features)[0]
+            forecast.append(pred)
+            
+            # Add to series for next prediction
+            current_series = pd.concat([current_series, pd.Series([pred])])
+        
+        return np.array(forecast)
+    except Exception as e:
+        print(f"Error forecasting with XGBoost: {e}")
         return np.array([])
