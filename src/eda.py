@@ -147,3 +147,42 @@ def plot_volatility(
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     print(f"Saved plot to {save_path}")
     plt.close()
+
+
+def plot_volume(
+    data: pd.DataFrame,
+    ticker: str,
+    save_path: Optional[str] = None
+):
+    """Plot volume analysis."""
+    if data.empty or 'Volume' not in data.columns:
+        print("No volume data to plot")
+        return
+    
+    import matplotlib
+    matplotlib.use('Agg')
+    
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+    
+    # Volume over time
+    ax1.plot(data.index, data['Volume'], alpha=0.7, color='green')
+    ax1.set_ylabel('Volume')
+    ax1.set_title(f'{ticker} Trading Volume Over Time')
+    ax1.grid(True, alpha=0.3)
+    
+    # Price vs Volume
+    ax2.scatter(data['Volume'], data['Close'], alpha=0.5, s=10)
+    ax2.set_xlabel('Volume')
+    ax2.set_ylabel('Price ($)')
+    ax2.set_title(f'{ticker} Price vs Volume')
+    ax2.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    if save_path is None:
+        os.makedirs('results', exist_ok=True)
+        save_path = f'results/{ticker}_volume.png'
+    
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    print(f"Saved plot to {save_path}")
+    plt.close()
