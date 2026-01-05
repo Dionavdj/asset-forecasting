@@ -3,7 +3,7 @@ Evaluation metrics for forecasting models.
 """
 import numpy as np
 import pandas as pd
-from sklearn.metrics import mean_squared_error, mean_absolute_error
+from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
 
 
 def calculate_rmse(actual: np.ndarray, predicted: np.ndarray) -> float:
@@ -23,6 +23,20 @@ def calculate_mae(actual: np.ndarray, predicted: np.ndarray) -> float:
     
     mae = mean_absolute_error(actual, predicted)
     return mae
+
+
+def calculate_mape(actual: np.ndarray, predicted: np.ndarray) -> float:
+    """Calculate Mean Absolute Percentage Error."""
+    if len(actual) != len(predicted):
+        raise ValueError("Arrays must have same length")
+    
+    # Avoid division by zero
+    mask = actual != 0
+    if not mask.any():
+        return np.inf
+    
+    mape = mean_absolute_percentage_error(actual[mask], predicted[mask])
+    return mape
 
 
 def train_test_split(data: pd.Series, test_size: float = 0.2):
