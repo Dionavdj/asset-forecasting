@@ -1,268 +1,359 @@
 """
-Forecasting models for stock returns.
+Thin models module that exposes forecasting helpers.
+This module wraps model functions used by the CLI so code can import
+`src.models` instead of relying on `src.main` internals.
+
+Notes:
+- XGBoost is used for the ML pipeline. Import is performed lazily inside
+  functions so importing this module does not fail in editors or test
+  environments where `xgboost` may not be installed. When ML functions are
+  invoked and `xgboost` is missing a clear ImportError with install
+  instructions is raised.
 """
+from typing import Optional, TYPE_CHECKING, Literal
 import numpy as np
 import pandas as pd
-from statsmodels.tsa.ar_model import AutoReg
 from statsmodels.tsa.arima.model import ARIMA
 from pmdarima import auto_arima
-from sklearn.linear_model import Ridge, Lasso, ElasticNet
-from sklearn.preprocessing import StandardScaler
-from xgboost import XGBRegressor
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.metrics import mean_squared_error
 
+if TYPE_CHECKING:
+    from xgboost import XGBRegressor
 
-def random_walk_baseline(returns: pd.Series, n_periods: int) -> np.ndarray:
-    """Random walk with drift - simple baseline model."""
-    clean_returns = returns.dropna()
-    
-    if len(clean_returns) == 0:
-        return np.zeros(n_periods)
-    
-    # Mean return (drift)
-    mean_return = clean_returns.mean()
-    
-    # Forecast: just use mean return for all periods
-    forecast = np.full(n_periods, mean_return)
-    return forecast
-
-
-def train_ar1(returns: pd.Series):
-    """Train AR(1) model on returns."""
-    # Remove NaN values
-    clean_returns = returns.dropna()
-    
-    if len(clean_returns) < 10:
-        return None
-    
+def _get_xgb_regressor_class():
+    """Lazily import and return the XGBRegressor class or raise a helpful error."""
     try:
-        model = AutoReg(clean_returns, lags=1)
-        fitted = model.fit()
-        return fitted
+        from xgboost import XGBRegressor
+        return XGBRegressor
     except Exception as e:
-        print(f"Error training AR(1): {e}")
+        raise ImportError(
+            "XGBoost is required for XGB model functions but failed to import.\n"
+            "To install, use conda:\n"
+            "  conda env create -f environment.yml\n"
+            "  conda activate stock-forecast\n"
+            f"Original import error: {e}"
+        ) from e
+
+def train_xgb_cv(log_returns: pd.Series, exog_df: Optional[pd.DataFrame], lags: int = 5, n_splits: int = 3):
+    """Train XGBoost using simple time-series cross-validation and return best fitted model.
+    Returns None when there's not enough data to train.
+    """
+    XGBCls = _get_xgb_regressor_class()
+    aligned_exog = None
+    if exog_df is not None and not exog_df.empty:
+        aligned_exog = exog_df.reindex(log_returns.index)
+    def make_design(series: pd.Series, exog: Optional[pd.DataFrame]):
+        df = pd.DataFrame({"target": series})
+        for i in range(1, lags + 1):
+            df[f"lag_{i}"] = series.shift(i)
+        if exog is not None:
+            for col in exog.columns:
+                df[col] = exog[col]
+        df = df.dropna()
+        y_local = df["target"]
+        X_local = df.drop(columns="target")
+        return X_local, y_local
+    X, y = make_design(log_returns, aligned_exog)
+    if len(y) < max(20, lags + 1):
         return None
+    
+    # Set seed before XGBoost operations for reproducibility
+    np.random.seed(42)
+    
+    tscv = TimeSeriesSplit(n_splits=n_splits)
+    best_score = float("inf")
+    best_model = None
+    param_grid = [
+        {"max_depth": 3, "learning_rate": 0.05},
+        {"max_depth": 4, "learning_rate": 0.03},
+    ]
+    for params in param_grid:
+        cv_scores = []
+        for train_idx, val_idx in tscv.split(X):
+            X_tr, X_val = X.iloc[train_idx], X.iloc[val_idx]
+            y_tr, y_val = y.iloc[train_idx], y.iloc[val_idx]
+            
+            # Set seed before each model creation for reproducibility
+            np.random.seed(42)
+            model = XGBCls(
+                n_estimators=300,
+                max_depth=params["max_depth"],
+                learning_rate=params["learning_rate"],
+                subsample=1.0,  # Changed from 0.8 to 1.0 for full determinism
+                colsample_bytree=1.0,  # Changed from 0.8 to 1.0 for full determinism
+                objective="reg:squarederror",
+                random_state=42,
+                tree_method='hist',  # Deterministic tree construction
+                n_jobs=1,  # Single thread for reproducibility
+                deterministic=True,  # For XGBoost 2.x deterministic behavior
+            )
+            model.fit(X_tr, y_tr)
+            preds = model.predict(X_val)
+            cv_scores.append(mean_squared_error(y_val, preds))
+        mean_cv = float(np.mean(cv_scores))
+        if mean_cv < best_score:
+            best_score = mean_cv
+            # refit on full data
+            # Set seed before refit for reproducibility
+            np.random.seed(42)
+            best_model = XGBCls(
+                n_estimators=300,
+                max_depth=params["max_depth"],
+                learning_rate=params["learning_rate"],
+                subsample=1.0,  # Changed from 0.8 to 1.0 for full determinism
+                colsample_bytree=1.0,  # Changed from 0.8 to 1.0 for full determinism
+                objective="reg:squarederror",
+                random_state=42,
+                tree_method='hist',  # Deterministic tree construction
+                n_jobs=1,  # Single thread for reproducibility
+                deterministic=True,  # For XGBoost 2.x deterministic behavior
+            )
+            best_model.fit(X, y)
+    return best_model
 
-
-def forecast_ar1(model, n_periods: int) -> np.ndarray:
-    """Forecast using AR(1) model."""
+def forecast_with_xgb(log_returns: pd.Series, exog_df: Optional[pd.DataFrame], steps: int, lags: int = 5, model=None) -> Optional[np.ndarray]:
+    """Iterative one-step XGBoost forecast on log-returns using lag features (and optional exogenous).
+    If `model` is None the function will train a default XGBRegressor on the available data.
+    """
+    XGBCls = _get_xgb_regressor_class()
+    aligned_exog = None
+    if exog_df is not None and not exog_df.empty:
+        aligned_exog = exog_df.reindex(log_returns.index)
+    def make_design(series: pd.Series, exog: Optional[pd.DataFrame]):
+        df = pd.DataFrame({"target": series})
+        for i in range(1, lags + 1):
+            df[f"lag_{i}"] = series.shift(i)
+        if exog is not None:
+            for col in exog.columns:
+                df[col] = exog[col]
+        df = df.dropna()
+        y_local = df["target"]
+        X_local = df.drop(columns="target")
+        return X_local, y_local
+    X_train, y_train = make_design(log_returns, aligned_exog)
+    if len(y_train) < max(20, lags + 1):
+        return None
     if model is None:
-        return np.array([])
-    
-    try:
-        forecast = model.forecast(steps=n_periods)
-        return forecast
-    except Exception as e:
-        print(f"Error forecasting with AR(1): {e}")
-        return np.array([])
-
-
-def train_arima(returns: pd.Series):
-    """Train ARIMA model with auto-selected order."""
-    clean_returns = returns.dropna()
-    
-    if len(clean_returns) < 20:
-        return None
-    
-    try:
-        # Use auto_arima to find best order
-        auto_model = auto_arima(
-            clean_returns,
-            start_p=0, start_q=0,
-            max_p=3, max_q=3,
-            seasonal=False,
-            stepwise=True,
-            suppress_warnings=True,
-            error_action='ignore',
+        # Set seed before training for reproducibility
+        np.random.seed(42)
+        model = XGBCls(
+            n_estimators=300,
+            max_depth=3,
+            learning_rate=0.05,
+            subsample=1.0,  # Changed from 0.8 to 1.0 for full determinism
+            colsample_bytree=1.0,  # Changed from 0.8 to 1.0 for full determinism
+            objective="reg:squarederror",
             random_state=42,
-            n_jobs=1
+            tree_method='hist',  # Deterministic tree construction
+            n_jobs=1,  # Single thread for reproducibility
+            deterministic=True,  # For XGBoost 2.x deterministic behavior
         )
-        
-        # Get the order and fit with statsmodels for consistency
-        order = auto_model.order
-        model = ARIMA(clean_returns, order=order)
-        fitted = model.fit()
-        return fitted
-    except Exception as e:
-        print(f"Error training ARIMA: {e}")
-        # Fallback to simple AR(1)
-        try:
-            model = ARIMA(clean_returns, order=(1, 0, 0))
-            fitted = model.fit()
-            return fitted
-        except:
-            return None
+        model.fit(X_train, y_train)
+    history = list(log_returns.values)
+    exog_last = aligned_exog.iloc[-1] if aligned_exog is not None else None
+    feature_cols = list(X_train.columns)
+    preds = []
+    for _ in range(steps):
+        row = {}
+        for col in feature_cols:
+            if col.startswith("lag_"):
+                lag_idx = int(col.split("_")[1])
+                row[col] = history[-lag_idx]
+            elif exog_last is not None and col in exog_last:
+                row[col] = exog_last[col]
+        input_df = pd.DataFrame([row], columns=feature_cols)
+        next_ret = float(model.predict(input_df)[0])
+        preds.append(next_ret)
+        history.append(next_ret)
+    return np.asarray(preds)
 
 
-def forecast_arima(model, n_periods: int) -> np.ndarray:
-    """Forecast using ARIMA model."""
-    if model is None:
-        return np.array([])
-    
-    try:
-        forecast = model.forecast(steps=n_periods)
-        return forecast
-    except Exception as e:
-        print(f"Error forecasting with ARIMA: {e}")
-        return np.array([])
+def train_linear_cv(
+    log_returns: pd.Series,
+    exog_df: Optional[pd.DataFrame],
+    model_kind: Literal["ridge", "lasso", "elasticnet"],
+    lags: int = 5,
+    n_splits: int = 3,
+):
+    """Train a regularized linear model (Ridge/Lasso/ElasticNet) using simple time-series CV.
 
+    Returns a fitted model, or None when there's not enough data to train.
+    """
+    from sklearn.linear_model import Ridge, Lasso, ElasticNet
 
-def _create_lag_features(returns: pd.Series, lags: int):
-    """Helper function to create lag features."""
-    X = []
-    y = []
-    
-    for i in range(lags, len(returns)):
-        features = [returns.iloc[i - j] for j in range(1, lags + 1)]
-        X.append(features)
-        y.append(returns.iloc[i])
-    
-    return np.array(X), np.array(y)
+    aligned_exog = None
+    if exog_df is not None and not exog_df.empty:
+        aligned_exog = exog_df.reindex(log_returns.index)
 
+    def make_design(series: pd.Series, exog: Optional[pd.DataFrame]):
+        df = pd.DataFrame({"target": series})
+        for i in range(1, lags + 1):
+            df[f"lag_{i}"] = series.shift(i)
+        if exog is not None:
+            for col in exog.columns:
+                df[col] = exog[col]
+        df = df.dropna()
+        y_local = df["target"]
+        X_local = df.drop(columns="target")
+        return X_local, y_local
 
-def train_ridge(returns: pd.Series, lags: int = 5, alpha: float = 1.0):
-    """Train Ridge regression model with lag features."""
-    clean_returns = returns.dropna()
-    
-    if len(clean_returns) < lags + 10:
-        return None, None
-    
-    X, y = _create_lag_features(clean_returns, lags)
-    
-    # Scale features
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    
-    try:
-        model = Ridge(alpha=alpha, random_state=42)
-        model.fit(X_scaled, y)
-        return model, scaler
-    except Exception as e:
-        print(f"Error training Ridge: {e}")
-        return None, None
-
-
-def train_lasso(returns: pd.Series, lags: int = 5, alpha: float = 0.1):
-    """Train Lasso regression model with lag features."""
-    clean_returns = returns.dropna()
-    
-    if len(clean_returns) < lags + 10:
-        return None, None
-    
-    X, y = _create_lag_features(clean_returns, lags)
-    
-    # Scale features
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    
-    try:
-        model = Lasso(alpha=alpha, random_state=42, max_iter=1000)
-        model.fit(X_scaled, y)
-        return model, scaler
-    except Exception as e:
-        print(f"Error training Lasso: {e}")
-        return None, None
-
-
-def train_elasticnet(returns: pd.Series, lags: int = 5, alpha: float = 0.1, l1_ratio: float = 0.5):
-    """Train ElasticNet regression model with lag features."""
-    clean_returns = returns.dropna()
-    
-    if len(clean_returns) < lags + 10:
-        return None, None
-    
-    X, y = _create_lag_features(clean_returns, lags)
-    
-    # Scale features
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    
-    try:
-        model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio, random_state=42, max_iter=1000)
-        model.fit(X_scaled, y)
-        return model, scaler
-    except Exception as e:
-        print(f"Error training ElasticNet: {e}")
-        return None, None
-
-
-def forecast_linear(model, scaler, returns: pd.Series, n_periods: int, lags: int = 5) -> np.ndarray:
-    """Forecast using linear model (Ridge/Lasso/ElasticNet)."""
-    if model is None or scaler is None:
-        return np.array([])
-    
-    clean_returns = returns.dropna()
-    
-    if len(clean_returns) < lags:
-        return np.array([])
-    
-    forecast = []
-    current_series = clean_returns.copy()
-    
-    try:
-        for _ in range(n_periods):
-            # Get last lags values
-            features = [current_series.iloc[-j] for j in range(1, lags + 1)]
-            features = np.array(features).reshape(1, -1)
-            features_scaled = scaler.transform(features)
-            
-            # Predict next value
-            pred = model.predict(features_scaled)[0]
-            forecast.append(pred)
-            
-            # Add to series for next prediction
-            current_series = pd.concat([current_series, pd.Series([pred])])
-        
-        return np.array(forecast)
-    except Exception as e:
-        print(f"Error forecasting with linear model: {e}")
-        return np.array([])
-
-
-def train_xgb(returns: pd.Series, lags: int = 5):
-    """Train XGBoost model on returns with lag features."""
-    clean_returns = returns.dropna()
-    
-    if len(clean_returns) < lags + 10:
-        return None
-    
-    X, y = _create_lag_features(clean_returns, lags)
-    
-    try:
-        model = XGBRegressor(n_estimators=100, max_depth=3, random_state=42)
-        model.fit(X, y)
-        return model
-    except Exception as e:
-        print(f"Error training XGBoost: {e}")
+    X, y = make_design(log_returns, aligned_exog)
+    if len(y) < max(30, lags + 5):
         return None
 
+    np.random.seed(42)
+    tscv = TimeSeriesSplit(n_splits=n_splits)
 
-def forecast_xgb(model, returns: pd.Series, n_periods: int, lags: int = 5) -> np.ndarray:
-    """Forecast using XGBoost model."""
-    if model is None:
-        return np.array([])
+    alpha_grid = [0.001, 0.01, 0.1, 1.0, 10.0]
+    l1_ratio_grid = [0.1, 0.5, 0.9]
+
+    best_score = float("inf")
+    best_params = None
+
+    def make_model(alpha: float, l1_ratio: Optional[float] = None):
+        if model_kind == "ridge":
+            return Ridge(alpha=alpha, random_state=None)
+        if model_kind == "lasso":
+            return Lasso(alpha=alpha, max_iter=5000, selection="cyclic", random_state=42)
+        # elasticnet
+        return ElasticNet(alpha=alpha, l1_ratio=float(l1_ratio), max_iter=5000, selection="cyclic", random_state=42)
+
+    for alpha in alpha_grid:
+        if model_kind == "elasticnet":
+            for l1_ratio in l1_ratio_grid:
+                cv_scores = []
+                for train_idx, val_idx in tscv.split(X):
+                    X_tr, X_val = X.iloc[train_idx], X.iloc[val_idx]
+                    y_tr, y_val = y.iloc[train_idx], y.iloc[val_idx]
+                    model = make_model(alpha=alpha, l1_ratio=l1_ratio)
+                    model.fit(X_tr, y_tr)
+                    preds = model.predict(X_val)
+                    cv_scores.append(mean_squared_error(y_val, preds))
+                mean_cv = float(np.mean(cv_scores))
+                if mean_cv < best_score:
+                    best_score = mean_cv
+                    best_params = {"alpha": float(alpha), "l1_ratio": float(l1_ratio)}
+        else:
+            cv_scores = []
+            for train_idx, val_idx in tscv.split(X):
+                X_tr, X_val = X.iloc[train_idx], X.iloc[val_idx]
+                y_tr, y_val = y.iloc[train_idx], y.iloc[val_idx]
+                model = make_model(alpha=alpha)
+                model.fit(X_tr, y_tr)
+                preds = model.predict(X_val)
+                cv_scores.append(mean_squared_error(y_val, preds))
+            mean_cv = float(np.mean(cv_scores))
+            if mean_cv < best_score:
+                best_score = mean_cv
+                best_params = {"alpha": float(alpha)}
+
+    if not best_params:
+        return None
+
+    # Refit on full data with the best params
+    if model_kind == "elasticnet":
+        model = make_model(alpha=best_params["alpha"], l1_ratio=best_params["l1_ratio"])
+    else:
+        model = make_model(alpha=best_params["alpha"])
+    model.fit(X, y)
+    return model
+
+
+def forecast_with_linear(
+    log_returns: pd.Series,
+    exog_df: Optional[pd.DataFrame],
+    steps: int,
+    model,
+    lags: int = 5,
+) -> Optional[np.ndarray]:
+    """Iterative one-step forecast using a fitted regularized linear model."""
+    aligned_exog = None
+    if exog_df is not None and not exog_df.empty:
+        aligned_exog = exog_df.reindex(log_returns.index)
+
+    def make_design(series: pd.Series, exog: Optional[pd.DataFrame]):
+        df = pd.DataFrame({"target": series})
+        for i in range(1, lags + 1):
+            df[f"lag_{i}"] = series.shift(i)
+        if exog is not None:
+            for col in exog.columns:
+                df[col] = exog[col]
+        df = df.dropna()
+        y_local = df["target"]
+        X_local = df.drop(columns="target")
+        return X_local, y_local
+
+    X_train, y_train = make_design(log_returns, aligned_exog)
+    if len(y_train) < max(30, lags + 5):
+        return None
+
+    history = list(log_returns.values)
+    exog_last = aligned_exog.iloc[-1] if aligned_exog is not None else None
+    feature_cols = list(X_train.columns)
+
+    preds = []
+    for _ in range(int(steps)):
+        row = {}
+        for col in feature_cols:
+            if col.startswith("lag_"):
+                lag_idx = int(col.split("_")[1])
+                row[col] = history[-lag_idx]
+            elif exog_last is not None and col in exog_last:
+                row[col] = exog_last[col]
+        input_df = pd.DataFrame([row], columns=feature_cols)
+        next_ret = float(model.predict(input_df)[0])
+        preds.append(next_ret)
+        history.append(next_ret)
+    return np.asarray(preds)
+
+def train_ar1(log_returns: pd.Series, exog_df: Optional[pd.DataFrame] = None):
+    """Train an explicit AR(1) model (autoregressive model of order 1).
     
-    clean_returns = returns.dropna()
+    This is equivalent to ARIMA(1,0,0) but provided as a separate function
+    for clarity and explicit model comparison.
     
-    if len(clean_returns) < lags:
-        return np.array([])
-    
-    forecast = []
-    current_series = clean_returns.copy()
-    
-    try:
-        for _ in range(n_periods):
-            # Get last lags values
-            features = [current_series.iloc[-j] for j in range(1, lags + 1)]
-            features = np.array(features).reshape(1, -1)
-            
-            # Predict next value
-            pred = model.predict(features)[0]
-            forecast.append(pred)
-            
-            # Add to series for next prediction
-            current_series = pd.concat([current_series, pd.Series([pred])])
+    Args:
+        log_returns: Time series of log returns
+        exog_df: Optional DataFrame of exogenous variables
         
-        return np.array(forecast)
-    except Exception as e:
-        print(f"Error forecasting with XGBoost: {e}")
-        return np.array([])
+    Returns:
+        Fitted ARIMA model with order (1,0,0)
+    """
+    if exog_df is not None and not exog_df.empty:
+        aligned_exog = exog_df.reindex(log_returns.index).dropna()
+        aligned_returns = log_returns.reindex(aligned_exog.index).dropna()
+        if len(aligned_returns) < 10:
+            raise ValueError("Insufficient data after alignment for AR(1) model")
+        model = ARIMA(aligned_returns, order=(1, 0, 0), exog=aligned_exog).fit()
+    else:
+        model = ARIMA(log_returns, order=(1, 0, 0)).fit()
+    return model
+
+def forecast_ar1(model, steps: int, exog_future: Optional[np.ndarray] = None) -> np.ndarray:
+    """Forecast using a fitted AR(1) model.
+    
+    Args:
+        model: Fitted ARIMA model with order (1,0,0)
+        steps: Number of steps to forecast
+        exog_future: Optional 2D array with shape (steps, n_exog) for exogenous variables
+        
+    Returns:
+        Array of forecasted log returns
+    """
+    if exog_future is not None:
+        return model.forecast(steps=steps, exog=exog_future).to_numpy().flatten()
+    return model.forecast(steps=steps).to_numpy().flatten()
+
+def forecast_from_arima(model, model_type: str, steps: int, exog_future: Optional[np.ndarray] = None):
+    """Forecast using either a statsmodels ARIMAResults or a pmdarima AutoARIMA.
+    exog_future (optional): 2D array-like with shape (steps, n_exog) used when
+    the fitted model was trained with exogenous regressors.
+    """
+    if model_type == "arima_fixed":
+        if exog_future is not None:
+            return model.forecast(steps=steps, exog=exog_future).to_numpy().flatten()
+        return model.forecast(steps=steps).to_numpy().flatten()
+    if exog_future is not None:
+        return np.asarray(model.predict(n_periods=steps, exogenous=exog_future)).flatten()
+    return np.asarray(model.predict(n_periods=steps)).flatten()
