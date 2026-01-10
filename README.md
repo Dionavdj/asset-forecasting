@@ -1,10 +1,10 @@
-# Machine Learning Model Comparison for Financial Asset Forecasting
+# Financial Return and Volatility Forecasting
 
 ## Project Overview
 
-This project implements and compares multiple forecasting models to predict financial asset returns and volatility over different investment horizons. The research question is:
+This project compares econometric and machine learning models for return forecasting and GARCH vs. EWMA for volatility forecasting across multiple horizons. The research question is:
 
-**Which model best predicts asset returns and volatility over different investment horizons: statistical time-series models or machine learning models?**
+**Which models best predict asset returns (econometric vs. ML), and which volatility model (GARCH vs. EWMA) provides better risk forecasts across horizons?**
 
 ## Models Implemented
 

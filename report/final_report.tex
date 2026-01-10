@@ -64,7 +64,7 @@
 \title{%
     \Large \textbf{Advanced Programming 2025} \\
     \vspace{0.5cm}
-    \LARGE \textbf{Machine Learning Model Comparison for Financial Asset Return and Volatility Forecasting} \\
+    \LARGE \textbf{Financial Asset Return and Volatility Forecasting: Econometric vs ML for Returns \\ GARCH vs EWMA for Volatility} \\
     \vspace{0.3cm}
     \large Final Project Report
 }
@@ -82,7 +82,7 @@
 
 \begin{abstract}
 \noindent
-This project studies how far standard econometric models and machine learning methods can go in forecasting equity returns and volatility within a fully reproducible pipeline. Using Tesla (TSLA) as a high-volatility case, we benchmark a random walk against AR(1), automatically selected ARIMA models, regularized linear regressions, and XGBoost over horizons ranging from 10 trading days to one year. To prevent look-ahead bias, model choice is based exclusively on a validation window; the selected model is then refit on the combined train+validation sample and evaluated out of sample using price-level errors. The main empirical result is that return forecasts remain weak: once realistic time-series validation is enforced, gains over the random walk are not stable. Volatility, however, is substantially more predictable. A GJR-GARCH(1,1) specification with Student-$t$ innovations consistently improves on an EWMA baseline and yields credible uncertainty bands for Monte Carlo price simulations. Overall, the pipeline is more reliable as a risk and uncertainty tool than as a point return forecasting engine.
+This project compares econometric and machine learning models for forecasting equity returns, and compares GARCH vs EWMA for volatility forecasting, within a fully reproducible pipeline. Using Tesla (TSLA) as a high-volatility case, we benchmark a random walk against AR(1), automatically selected ARIMA models, regularized linear regressions, and XGBoost over horizons ranging from 10 trading days to one year. To prevent look-ahead bias, model choice is based exclusively on a validation window; the selected model is then refit on the combined train+validation sample and evaluated out of sample using price-level errors. The main empirical result is that return forecasts remain weak: once realistic time-series validation is enforced, gains over the random walk are not stable. Volatility, however, is substantially more predictable. A GJR-GARCH(1,1) specification with Student-$t$ innovations consistently improves on an EWMA baseline and yields credible uncertainty bands for Monte Carlo price simulations. Overall, the pipeline is more reliable as a risk and uncertainty tool than as a point return forecasting engine.
 \end{abstract}
 
 \vspace{0.5cm}
@@ -102,7 +102,7 @@ This project studies how far standard econometric models and machine learning me
 
 \hspace*{\parindent}Forecasting asset prices and their volatility is a central problem in financial modeling and risk management. Accurate volatility forecasts are critical for derivative pricing, portfolio risk control and Value at Risk (VaR) estimation, while reliable return forecasts would offer direct value for investment decisions. Despite extensive academic and practical effort, predicting equity returns remains notoriously difficult, largely due to the efficient market hypothesis, which asserts that asset prices incorporate available information and therefore follow a near random walk \parencite{Fama1970}. In contrast, volatility often exhibits persistence and clustering, suggesting that second moment dynamics may be forecastable even when mean returns are not.
 
-\noindent This project assesses the relative performance of traditional econometric models and modern machine learning methods for forecasting equity returns and volatility across multiple horizons. Using Tesla (TSLA) stock data, we evaluate whether increased model flexibility translates into improved predictive accuracy and we build a reproducible end to end pipeline that integrates model estimation, validation based selection and Monte Carlo simulation for uncertainty quantification. The evaluation explicitly follows instructor guidance: model selection is performed on a validation set and regularized linear baselines are included to mitigate overfitting in noisy return data.
+\noindent This project assesses econometric and machine learning models for forecasting equity returns and compares GARCH vs EWMA for volatility across multiple horizons. Using Tesla (TSLA) stock data, we evaluate whether increased model flexibility translates into improved predictive accuracy for returns and we build a reproducible end to end pipeline that integrates model estimation, validation based selection and Monte Carlo simulation for uncertainty quantification. The evaluation explicitly follows instructor guidance: model selection is performed on a validation set and regularized linear baselines are included to mitigate overfitting in noisy return data.
 
 \noindent Tesla is an informative test case because it combines high volatility, sharp regime shifts and heavy retail attention. These features amplify the difficulty of return prediction while providing a clear signal for volatility dynamics. Framing the project around a single asset allows for a focused, reproducible experiment that highlights what is and is not forecastable in practice.
 
@@ -115,7 +115,7 @@ This project studies how far standard econometric models and machine learning me
 \setlength{\parskip}{0.35\baselineskip}
 \setlength{\parindent}{1.25em}
 
-\hspace*{\parindent}Research question. Can standard econometric models and modern machine learning methods deliver return forecasts that beat a random walk benchmark and can volatility models provide reliable risk estimates across multiple horizons for a high volatility equity? We study this question using TSLA as a demanding empirical setting and evaluate all models under a strict time series validation protocol.
+\hspace*{\parindent}Research question. Can econometric and machine learning models deliver return forecasts that beat a random walk benchmark, and can GARCH type volatility models improve on EWMA for reliable risk estimates across multiple horizons for a high volatility equity? We study this question using TSLA as a demanding empirical setting and evaluate all models under a strict time series validation protocol.
 
 \noindent The literature draws a clear distinction between return predictability and volatility predictability. Under market efficiency, excess returns are difficult to forecast and the random walk with drift is a hard to beat benchmark \parencite{Fama1970}. Empirical studies show that linear predictability in daily returns is weak and unstable across time and assets \parencite{Campbell1997,Hansen2005}. Large scale out of sample comparisons also find that many popular predictors fail to beat the historical mean when evaluated in real time, reinforcing the robustness of simple baselines \parencite{Welch2008}.
 
@@ -464,7 +464,7 @@ Limitations include the focus on a single asset (TSLA), a restricted set of engi
 \begingroup
 \setlength{\parskip}{0.5\baselineskip}
 \setlength{\parindent}{1.25em}
-\hspace*{\parindent}This project delivers a reproducible forecasting pipeline and a transparent comparison of econometric and machine learning models for TSLA return and volatility forecasting. Across horizons, the random walk baseline remains a strong benchmark and selection based on validation RMSE does not always generalize to the test set. The results therefore reinforce a core empirical message: return predictability is fragile, while volatility dynamics are more stable and forecastable.
+\hspace*{\parindent}This project delivers a reproducible forecasting pipeline and a transparent comparison of econometric and machine learning models for TSLA return forecasting, alongside GARCH vs EWMA for volatility forecasting. Across horizons, the random walk baseline remains a strong benchmark and selection based on validation RMSE does not always generalize to the test set. The results therefore reinforce a core empirical message: return predictability is fragile, while volatility dynamics are more stable and forecastable.
 
 \noindent Methodologically, the pipeline emphasizes time series integrity, reproducibility and probabilistic outputs. The Monte Carlo layer and volatility modeling make long horizon forecasts usable as risk bands rather than single price targets.
 
