@@ -1,0 +1,6 @@
+{
+  "latex-workshop.chktex.args": [
+    "-l",
+    "report/.chktexrc"
+  ]
+}

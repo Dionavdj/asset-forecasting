@@ -1,0 +1,9 @@
+# Project-specific ChkTeX config: suppress noisy warnings.
+CmdLine
+{
+    -n 8
+    -n 12
+    -n 13
+    -n 24
+    -n 36
+}
