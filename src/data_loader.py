@@ -4,10 +4,15 @@ Data loading helpers.
 import numpy as np
 import math
 import os
+from datetime import datetime, timedelta
 from typing import Dict, Optional
 
 import pandas as pd
 import yfinance as yf
+
+# Fixed sample window for reproducibility.
+START_DATE = datetime(2020, 12, 14)
+END_DATE = datetime(2025, 12, 12)
 
 
 def _get_cache_filename(ticker: str, period: str, interval: str) -> str:
@@ -15,6 +20,26 @@ def _get_cache_filename(ticker: str, period: str, interval: str) -> str:
     # Use a single cache file per ticker to always keep the latest data
     # This ensures we always have the most recent data and don't accumulate old files
     return f"yfinance_cache_{ticker}.csv"
+
+
+def _normalize_index(data: pd.DataFrame) -> pd.DataFrame:
+    """Ensure a timezone naive DatetimeIndex."""
+    if data.empty:
+        return data
+    if not isinstance(data.index, pd.DatetimeIndex):
+        data.index = pd.to_datetime(data.index)
+    if hasattr(data.index, "tz") and data.index.tz is not None:
+        data.index = data.index.tz_localize(None)
+    return data
+
+
+def _filter_to_date_range(data: pd.DataFrame) -> pd.DataFrame:
+    """Filter data to the fixed sample window."""
+    if data.empty:
+        return data
+    data = _normalize_index(data)
+    mask = (data.index >= START_DATE) & (data.index <= END_DATE)
+    return data.loc[mask]
 
 
 def _load_from_cache(ticker: str, period: str, interval: str) -> Optional[pd.DataFrame]:
@@ -26,12 +51,7 @@ def _load_from_cache(ticker: str, period: str, interval: str) -> Optional[pd.Dat
     if os.path.exists(cache_file):
         try:
             data = pd.read_csv(cache_file, index_col=0, parse_dates=True)
-            # Convert index to datetime if it's not already
-            if not isinstance(data.index, pd.DatetimeIndex):
-                data.index = pd.to_datetime(data.index)
-            # Convert to timezone-naive if needed.
-            if hasattr(data.index, 'tz') and data.index.tz is not None:
-                data.index = data.index.tz_localize(None)
+            data = _filter_to_date_range(data)
             print(f"[Cache] Loaded {ticker} data from cache ({len(data)} rows)")
             return data
         except Exception as e:
@@ -45,6 +65,7 @@ def _save_to_cache(ticker: str, period: str, interval: str, data: pd.DataFrame) 
     cache_dir = os.path.join(os.getcwd(), "data", "raw")
     os.makedirs(cache_dir, exist_ok=True)
     cache_file = os.path.join(cache_dir, _get_cache_filename(ticker, period, interval))
+    data = _filter_to_date_range(data)
     data.to_csv(cache_file)
     print(f"[Cache] Saved {ticker} data to cache ({len(data)} rows)")
 
@@ -59,10 +80,11 @@ def fetch_yfinance(
 ) -> pd.DataFrame:
     """
     Load cached stock data and download once if missing.
+    Downloads are constrained to the fixed sample window.
     
     Args:
         ticker: Stock ticker symbol
-        period: Download period when cache is missing (e.g., "5y").
+        period: Fallback download period when cache is missing (e.g., "5y").
         interval: Data interval ('1d' or '1mo').
         session: Unused (kept for compatibility).
         use_cache: Unused (kept for compatibility).
@@ -77,11 +99,13 @@ def fetch_yfinance(
             print(f"[Cache] No cached data found for {ticker}. Cache-only mode.")
             return pd.DataFrame()
 
-        print(f"[Download] Cache missing for {ticker}. Downloading {period} daily data...")
+        fallback_period = period if period and period != "cached" else "5y"
+        print(f"[Download] Cache missing for {ticker}. Downloading fixed window daily data...")
         try:
             downloaded = yf.download(
                 ticker,
-                period=period,
+                start=(START_DATE - timedelta(days=7)).strftime("%Y-%m-%d"),
+                end=(END_DATE + timedelta(days=1)).strftime("%Y-%m-%d"),
                 interval="1d",
                 auto_adjust=False,
                 progress=False,
@@ -91,12 +115,24 @@ def fetch_yfinance(
             return pd.DataFrame()
 
         if downloaded.empty:
-            print(f"[Download] No data returned for {ticker}.")
-            return pd.DataFrame()
+            print(f"[Download] No data returned for {ticker} (date range). Falling back to period.")
+            try:
+                downloaded = yf.download(
+                    ticker,
+                    period=fallback_period,
+                    interval="1d",
+                    auto_adjust=False,
+                    progress=False,
+                )
+            except Exception as exc:
+                print(f"[Download] Failed to download {ticker}: {exc}")
+                return pd.DataFrame()
 
-        downloaded.index = pd.to_datetime(downloaded.index)
-        if hasattr(downloaded.index, "tz") and downloaded.index.tz is not None:
-            downloaded.index = downloaded.index.tz_localize(None)
+            if downloaded.empty:
+                print(f"[Download] No data returned for {ticker}.")
+                return pd.DataFrame()
+
+        downloaded = _filter_to_date_range(downloaded)
 
         _save_to_cache(ticker, period, "1d", downloaded)
         cached_data = downloaded

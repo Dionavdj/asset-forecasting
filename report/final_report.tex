@@ -21,7 +21,7 @@
 \usepackage{enumitem}
 
 % References
-\usepackage[backend=biber,style=authoryear]{biblatex}
+\usepackage[backend=bibtex,style=authoryear]{biblatex}
 \addbibresource{references.bib} % Create this file for your references
 
 % Code listing settings
@@ -73,7 +73,7 @@
     \texttt{diona.avdija@unil.ch} \\
     Student ID: 22435333
 }
-\date{January 4, 2026}
+\date{January 11, 2026}
 
 \begin{document}
 
@@ -404,14 +404,14 @@ Forecast and volatility plots are generated automatically under \texttt{results/
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.85\textwidth,height=0.28\textheight,keepaspectratio]{../results/forecast_TSLA_1_year_20260108T105441Z.png}
+\includegraphics[width=0.85\textwidth,height=0.28\textheight,keepaspectratio]{../results/forecast_TSLA_1_year_20260110T123128Z.png}
 \caption{One year price forecast with Monte Carlo bands (TSLA).}
 \label{fig:forecast}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.85\textwidth,height=0.28\textheight,keepaspectratio]{../results/volatility_forecast_TSLA_1_year_20260108T105441Z.png}
+\includegraphics[width=0.85\textwidth,height=0.28\textheight,keepaspectratio]{../results/volatility_forecast_TSLA_1_year_20260110T123128Z.png}
 \caption{One year volatility forecast (annualized, TSLA).}
 \label{fig:vol}
 \end{figure}
@@ -503,21 +503,21 @@ Supplementary figures and diagnostics can be placed here.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.85\textwidth]{../results/eda_returns_distribution_TSLA_20260108T105421Z.png}
+\includegraphics[width=0.85\textwidth]{../results/eda_returns_distribution_TSLA_20260110T123108Z.png}
 \caption{EDA: return distribution and normality diagnostics (TSLA).}
 \label{fig:eda-returns}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.85\textwidth]{../results/eda_volatility_TSLA_20260108T105422Z.png}
+\includegraphics[width=0.85\textwidth]{../results/eda_volatility_TSLA_20260110T123109Z.png}
 \caption{EDA: 21 day rolling volatility showing clustering (TSLA).}
 \label{fig:eda-vol}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.7\textwidth]{../results/forecast_TSLA_3_months_20260108T105434Z.png}
+\includegraphics[width=0.7\textwidth]{../results/forecast_TSLA_3_months_20260110T123121Z.png}
 \caption{Example forecast gap at the horizon boundary (3 month forecast).}
 \label{fig:forecast-gap}
 \end{figure}
