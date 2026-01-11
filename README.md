@@ -63,7 +63,7 @@ python main.py
 ```
 
 This automatically runs:
-- **Exploratory Data Analysis (EDA)** with comprehensive plots and insights
+- **Exploratory Data Analysis (EDA)** 
 - **Forecasting for all horizons** (10 days, 1 month, 3 months, 6 months, 1 year)
 - Uses cached TSLA data from `data/raw/` for reproducibility (downloads once if missing)
 - Saves outputs to the `results/` directory when `--save` is used
@@ -182,18 +182,6 @@ The project is designed for maximum reproducibility:
   - `PYTHONHASHSEED=0` for hash-based operations
   - `OMP_NUM_THREADS=1` and related threading vars for single-threaded BLAS
 - **No user input**: No prompts or interactive elements - fully deterministic execution
-
-### Setting Up the Environment
-
-**⚠️ IMPORTANT: This project requires Python 3.10.0 for reproducibility.**
-
-**Using conda:**
-```bash
-conda env create -f environment.yml
-conda activate stock-forecast
-```
-
-This automatically installs Python 3.10.0 and all dependencies as specified in `environment.yml`.
 
 **Why Python 3.10.0?**
 - Matches the exact version specified in `environment.yml`

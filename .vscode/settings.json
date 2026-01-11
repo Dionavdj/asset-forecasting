@@ -2,5 +2,18 @@
   "latex-workshop.chktex.args": [
     "-l",
     "report/.chktexrc"
-  ]
+  ],
+  "files.exclude": {
+    "**/*.aux": true,
+    "**/*.bbl": true,
+    "**/*.bcf": true,
+    "**/*.blg": true,
+    "**/*.fdb_latexmk": true,
+    "**/*.fls": true,
+    "**/*.log": true,
+    "**/*.out": true,
+    "**/*.run.xml": true,
+    "**/*.synctex.gz": true,
+    "**/*.toc": true
+  }
 }
